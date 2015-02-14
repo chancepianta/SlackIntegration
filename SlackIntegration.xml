@@ -1,0 +1,131 @@
+<!DOCTYPE Rule PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<Rule name="Slack Integration">
+	<Description>
+		Simple integration with Slack incoming web hook API. This
+		integration uses the same API of SailPointContext's sendEmail
+		and can be used an alternative.
+	</Description>
+	<Signature>
+		<Inputs>
+			<Argument name="template" type="EmailTemplate"/>
+			<Argument name="options" type="EmailOptions"/>
+		</Inputs>
+	</Signature>
+	<Source>
+		<![CDATA[
+		import org.json.JSONObject;
+
+		import sailpoint.object.Configuration;
+		import sailpoint.object.EmailTemplate;
+		import sailpoint.object.EmailOptions;
+		import sailpoint.tools.Util;
+
+		import org.apache.http.HttpResponse;
+		import org.apache.http.client.HttpClient;
+		import org.apache.http.client.methods.HttpPost;
+		import org.apache.http.entity.StringEntity;
+		import org.apache.http.impl.client.DefaultHttpClient;
+
+		String DEFAULT_USERNAME = "IdentityIQ";
+		String DEFAULT_ICON_EMOJI_IIQ = ":incoming_envelope";
+		String DEFAULT_ICON_EMOJI_PERSON = ":information_desk_person";
+		String DEFAULT_BASE_SLACK_URL = "https://hooks.slack.com/services";
+		String TOKENS = "";
+
+		/**
+		 * Builds the necessary URL for performing the HTTP Post. This
+		 * URL value will either be built from the 'to' attribute value
+		 * of a variable name 'url' from the EmailOptions variables. If
+		 * neither of these are provided then the default values will
+		 * be used.
+		 */
+		String getUrl(EmailTemplate template, EmailOptions options) {
+			String url = template.getTo();
+			if ( Util.isNullOrEmpty(url) && !Util.isNullOrEmpty(options.getVariable("url")) ) {
+				url = options.getVariable("url");
+			} else {
+				url = DEFAULT_BASE_SLACK_URL + TOKENS;
+			}
+			if ( !url.startsWith("https://") ) {
+				url = "https://" + url;
+			}
+			return url;
+		}
+
+		/**
+		 * Returns either DEFAULT_ICON_EMOJI_IIQ or
+		 * DEFAULT_ICON_EMOJI_PERSON depending on the
+		 * given username.
+		 */
+		String getIconEmoji(String username) {
+			if ( Util.nullSafeEq(username, DEFAULT_USERNAME) ) {
+				return DEFAULT_ICON_EMOJI_IIQ;
+			}
+			return DEFAULT_ICON_EMOJI_PERSON;
+		}
+
+		/**
+		 * Performs HTTP Post request to Slack's incoming web
+		 * hook API. The url and JSON string values will both
+		 * be built before performing the post request and the
+		 * HTTP status code returned.
+		 */
+		String doPost(EmailTemplate template, EmailOptions options) {
+			String url = getUrl(template, options);
+			String json = getJson(template, options);
+			String result = "";
+			HttpClient client = new DefaultHttpClient();
+			try {
+				HttpPost post = new HttpPost(url);
+				StringEntity params = new StringEntity(json);
+				post.setHeader("Content-Type", "application/json");
+				post.setEntity(params);
+				HttpResponse response = client.execute(post);
+				result = response.getStatusLine().getStatusCode() + ": " + response.getStatusLine().getReasonPhrase();
+			} catch (Exception e) {
+				log.error("Method: doPost");
+				log.error("Error: " + e.getMessage());
+				result = e.getMessage();
+			} finally {
+				client.getConnectionManager().shutdown();
+			}
+			return result;
+		}
+
+		/**
+		 * Method for building the JSON object expected by Slack's
+		 * incomeing webhook API. The attributes of the JSON object
+		 * are mapped from the attribute values of both the compiled
+		 * EmailTemplate and EmailOptions. The JSON object is serialized
+		 * as a string and returned by the method.
+		 */
+		String getJson(EmailTemplate template, EmailOptions options) {
+			String username = (!Util.isNullOrEmpty(template.getFrom()) ? template.getFrom() : DEFAULT_USERNAME);
+			String iconEmoji = (!Util.isNullOrEmpty(options.getVariable("iconEmjoi")) ? options.getVariable("iconEmoji") : getIconEmoji(username));
+
+			JSONObject json = new JSONObject();
+			json.put("username", username);
+			if ( !Util.isNullOrEmpty(options.getVariable("iconUrl")) ) 
+				json.put("icon_url", options.getVariable("iconUrl"));
+			json.put("icon_emoji", iconEmoji);
+			if ( !Util.isNullOrEmpty(template.getSubject()) )
+				json.put("title", template.getSubject());
+			json.put("text", template.getBody());
+			return json.toString();
+		}
+
+		/**
+		 * Our main method for the rule. This method is called in the same
+		 * format as SailPointContext's sendEmail method. The template is
+		 * first compiled using the EmailOptions passed to the rule and the
+		 * HTTP Post is performed.
+		 */
+		String sendSlackNotification(EmailTemplate template, EmailOptions options) {
+			EmailTemplate compiledTemplate = template.compile(context, context.getObjectByName(Configuration.class, "SystemConfiguration"), options);
+			return doPost(compiledTemplate, options);
+		}
+
+		sendSlackNotification(template, options);
+		]]>
+	</Source>
+</Rule>
